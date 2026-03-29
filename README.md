@@ -1,97 +1,88 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Mobile Search Client
 
-# Getting Started
+A high-performance, local-first mobile application for document indexing and semantic search. This project allows users to search through personal documents (PDF, TXT, MD) using a combination of traditional keyword matching (BM25) and modern vector embeddings—all processed entirely on-device for maximum privacy.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## Features
 
-## Step 1: Start Metro
+- **Hybrid Search Engine**: Combines Full-Text Search (FTS5) with Vector Similarity (RRF) using `op-sqlite`.
+- **Native PDF Extraction**: High-performance text and page parsing via PDFBox (Android) and PDFKit (iOS).
+- **On-Device Embeddings**: Uses `onnxruntime-react-native` to generate embeddings locally.
+- **Privacy First**: No data leaves the device; all indexing and searching happen offline.
+- **Smart Chunking**: Page-aware document splitting for precise search result navigation.
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+## Prerequisites
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+- **Node.js**: 18.x or later
+- **React Native CLI**
+- **Android**: Android Studio & SDK (API 21+)
+- **iOS**: macOS with Xcode (15+) and CocoaPods
 
-```sh
-# Using npm
-npm start
+## Installation
 
-# OR using Yarn
-yarn start
-```
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd client
+   ```
 
-## Step 2: Build and run your app
+2. **Install dependencies**:
+   ```bash
+   npm install
+   # or
+   yarn install
+   ```
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+3. **Install iOS Pods**:
+   ```bash
+   cd ios && pod install && cd ..
+   ```
+
+## Model Setup (Required)
+
+The app uses the **multilingual-e5-small** model for generating text embeddings. To keep the repository lightweight, the model file is not included and must be downloaded manually.
+
+1. Create the models directory if it doesn't exist:
+   ```bash
+   mkdir -p assets/models
+   ```
+
+2. Download the quantized ONNX model. You can use the following command (or download it manually from a source like Hugging Face):
+   ```bash
+   # Example: Downloading from a compatible source
+   curl -L "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/model.onnx" -o assets/models/model_quantized.onnx
+   ```
+   *Note: Ensure the filename is exactly `model_quantized.onnx`.*
+
+3. Verify you have the following files in `assets/models/`:
+   - `model_quantized.onnx` (The file you just downloaded)
+   - `tokenizer.json` (Already in the repo)
+   - `tokenizer_config.json` (Already in the repo)
+
+## Running the App
 
 ### Android
-
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
+```bash
+npx react-native run-android
 ```
 
 ### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
+```bash
+npx react-native run-ios
 ```
 
-Then, and every time you update your native dependencies, run:
+## Search Modes
 
-```sh
-bundle exec pod install
-```
+- **BM25**: Classic keyword-based search. Best for finding exact terms and names.
+- **Semantic**: Vector-based search. Best for finding concepts and related meanings even without exact word matches.
+- **Hybrid**: Combined ranking (Reciprocal Rank Fusion). Provides the most balanced results by merging both strategies.
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+## Project Structure
 
-```sh
-# Using npm
-npm run ios
+- `android/` & `ios/`: Native modules for PDF extraction and platform configurations.
+- `src/services/`: Core logic for Database, Embedding, and Search services.
+- `src/screens/`: UI components for searching, document management, and results.
+- `assets/models/`: Tokenizer and ONNX model files.
 
-# OR using Yarn
-yarn ios
-```
+## License
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+MIT
