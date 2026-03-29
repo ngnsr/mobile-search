@@ -40,6 +40,11 @@ export interface SearchDocumentsResponse {
   metrics: SearchResponse['metrics'];
 }
 
+export type SearchFilters = {
+  kind?: 'all' | 'pdf' | 'txt' | 'md' | 'manual';
+  dateRangeDays?: number | null; // e.g. 7, 30; null/undefined = all time
+};
+
 export class SearchService {
   private db: DB;
   private readonly K_FACTOR = 60;
@@ -181,12 +186,30 @@ export class SearchService {
     mode: SearchMode,
     limit: number = 10,
     offset: number = 0,
+    filters?: SearchFilters,
   ): Promise<SearchDocumentsResponse> {
     Logger.info('SearchService', `Searching documents [${mode}]: "${query}"`);
     await this.ensureSchemaCheckedOnce();
 
     const statusFilter = this.hasDocumentsStatus ? "AND d.status = 'READY'" : '';
     const pageExpr = this.hasChunksPageNumber ? 'c.page_number' : 'NULL';
+
+    const kind = filters?.kind ?? 'all';
+    const dateDays = filters?.dateRangeDays ?? null;
+    const docWhereParts: string[] = [];
+    const docParams: any[] = [];
+    if (kind !== 'all') {
+      if (kind === 'manual') docWhereParts.push('d.source_kind IS NULL');
+      else {
+        docWhereParts.push('d.source_kind = ?');
+        docParams.push(kind);
+      }
+    }
+    if (dateDays && Number.isFinite(dateDays)) {
+      docWhereParts.push("d.created_at >= datetime('now', ?)");
+      docParams.push(`-${dateDays} days`);
+    }
+    const docWhere = docWhereParts.length ? `AND ${docWhereParts.join(' AND ')}` : '';
 
     let embeddingMs = 0;
     let queryEmbedding = '';
@@ -211,7 +234,7 @@ export class SearchService {
           FROM chunks_fts
           JOIN chunks c ON c.id = chunks_fts.rowid
           JOIN documents d ON d.id = c.document_id
-          WHERE chunks_fts MATCH ? ${statusFilter}
+          WHERE chunks_fts MATCH ? ${statusFilter} ${docWhere}
         ),
         ranked AS (
           SELECT *,
@@ -234,7 +257,7 @@ export class SearchService {
         LIMIT ?
         OFFSET ?;
       `;
-      params = [this.sanitizeFts5Query(query), limit, offset];
+      params = [this.sanitizeFts5Query(query), ...docParams, limit, offset];
     } else if (mode === 'semantic') {
       // Pull more candidates than the doc limit so grouping still returns enough docs.
       const k = Math.max(100, limit * 20);
@@ -248,7 +271,7 @@ export class SearchService {
           FROM vec_items r
           JOIN chunks c ON c.id = r.chunk_rowid
           JOIN documents d ON d.id = c.document_id
-          WHERE embedding MATCH vec_int8(?) AND k = ? ${statusFilter}
+          WHERE embedding MATCH vec_int8(?) AND k = ? ${statusFilter} ${docWhere}
           ORDER BY distance
         ),
         ranked AS (
@@ -272,7 +295,7 @@ export class SearchService {
         LIMIT ?
         OFFSET ?;
       `;
-      params = [queryEmbedding, k, limit, offset];
+      params = [queryEmbedding, k, ...docParams, limit, offset];
     } else if (mode === 'hybrid') {
       sql = `
         WITH 
@@ -282,7 +305,7 @@ export class SearchService {
             FROM chunks_fts
             JOIN chunks c ON c.id = chunks_fts.rowid
             JOIN documents d ON d.id = c.document_id
-            WHERE chunks_fts MATCH ? ${statusFilter}
+            WHERE chunks_fts MATCH ? ${statusFilter} ${docWhere}
             LIMIT 80
         ),
         vec_matches AS (
@@ -291,7 +314,7 @@ export class SearchService {
             FROM vec_items 
             JOIN chunks c ON c.id = vec_items.chunk_rowid
             JOIN documents d ON d.id = c.document_id
-            WHERE embedding MATCH vec_int8(?) AND k = 80 ${statusFilter}
+            WHERE embedding MATCH vec_int8(?) AND k = 80 ${statusFilter} ${docWhere}
             ORDER BY distance
         ),
         combined AS (
@@ -340,9 +363,13 @@ export class SearchService {
         LIMIT ?
         OFFSET ?;
       `;
+      // Note: docWhere placeholders appear twice (fts_matches + vec_matches), so docParams must be duplicated and
+      // placed right after the corresponding MATCH placeholders to match SQLite parameter order.
       params = [
         this.sanitizeFts5Query(query),
+        ...docParams,
         queryEmbedding,
+        ...docParams,
         this.K_FACTOR,
         this.K_FACTOR,
         limit,
@@ -355,6 +382,14 @@ export class SearchService {
     const searchMs = Date.now() - tSearch0;
 
     const results = (dbResults?.rows || []) as unknown as SearchDocumentResult[];
+    try {
+      await this.db.execute(
+        'INSERT INTO search_events (query_text, mode, embedding_ms, search_ms, results_count) VALUES (?, ?, ?, ?, ?);',
+        [query, mode, embeddingMs, searchMs, results.length],
+      );
+    } catch {
+      // ignore (table may not exist yet if user fast-refreshed)
+    }
     return { results, metrics: { embeddingMs, searchMs } };
   }
 

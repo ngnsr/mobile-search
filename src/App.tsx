@@ -6,13 +6,15 @@ import { DocumentListScreen } from './screens/DocumentListScreen';
 import { AddDocumentScreen } from './screens/AddDocumentScreen';
 import { SearchScreen } from './screens/SearchScreen';
 import { ResultDetailScreen } from './screens/ResultDetailScreen';
+import { StatsScreen } from './screens/StatsScreen';
 import { Document } from './services/DocumentService';
 import { SearchDocumentResult, SearchMode } from './services/SearchService';
+import { StatsService } from './services/StatsService';
 
-type Screen = 'list' | 'add' | 'search' | 'detail';
+type Screen = 'list' | 'add' | 'search' | 'detail' | 'stats';
 
 export default function App() {
-  const { isReady, status, documentService, searchService, fileIndexingService } = useAppInitialization();
+  const { isReady, status, db, documentService, searchService, fileIndexingService } = useAppInitialization();
   const [currentScreen, setCurrentScreen] = useState<Screen>('list');
   const [selectedItem, setSelectedItem] = useState<
     | { kind: 'doc'; doc: Document }
@@ -37,6 +39,7 @@ export default function App() {
             documentService={documentService!}
             onAddPress={() => setCurrentScreen('add')}
             onSearchPress={() => setCurrentScreen('search')}
+            onStatsPress={() => setCurrentScreen('stats')}
             onDocumentPress={(doc) => {
               setSelectedItem({ kind: 'doc', doc });
               setCurrentScreen('detail');
@@ -75,6 +78,13 @@ export default function App() {
               setSelectedItem(null);
               setCurrentScreen(selectedItem?.kind === 'doc' ? 'list' : 'search');
             }}
+          />
+        );
+      case 'stats':
+        return (
+          <StatsScreen
+            statsService={new StatsService(db!)}
+            onBack={() => setCurrentScreen('list')}
           />
         );
       default:

@@ -100,6 +100,18 @@ export function useAppInitialization() {
           );
         `);
 
+        await database.execute(`
+          CREATE TABLE IF NOT EXISTS search_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query_text TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            embedding_ms INTEGER NOT NULL DEFAULT 0,
+            search_ms INTEGER NOT NULL DEFAULT 0,
+            results_count INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+
         // Check version of vec to verify static initialization worked
         const result = await database.execute('SELECT vec_version() as version;');
         const vecVersion = (result?.rows?.[0]?.version as string) || 'Unknown';

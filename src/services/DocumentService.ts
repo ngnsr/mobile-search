@@ -42,9 +42,26 @@ export interface DocumentSource {
 
 export class DocumentService {
   private db: DB;
+  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(db: DB) {
     this.db = db;
+  }
+
+  private async withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const prev = this.writeQueue;
+    this.writeQueue = prev.then(() => next);
+
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
   }
 
   async listDocuments(): Promise<Document[]> {
@@ -101,34 +118,37 @@ export class DocumentService {
       const chunks = this.chunkText(content, 300).filter((c) => c.trim().length > 0);
       const totalChunks = chunks.length + 1; // + title chunk
 
-      await this.db.execute('BEGIN TRANSACTION');
-      const res = await this.db.execute(
-        "INSERT INTO documents (title, content, status, indexed_chunks, total_chunks, updated_at, fingerprint, source_uri, source_local_uri, source_name, source_kind, source_mtime, source_size) VALUES (?, ?, 'INDEXING', 0, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)",
-        [
-          title,
-          content,
-          totalChunks,
-          fingerprint,
-          source?.uri ?? null,
-          source?.localUri ?? null,
-          source?.name ?? null,
-          source?.kind ?? null,
-          source?.mtime ?? null,
-          source?.size ?? null,
-        ],
-      );
-      const docId = res.insertId!;
-      await this.db.execute('COMMIT');
+      const docId = await this.withWriteLock(async () => {
+        await this.db.execute('SAVEPOINT add_document;');
+        try {
+          const res = await this.db.execute(
+            "INSERT INTO documents (title, content, status, indexed_chunks, total_chunks, updated_at, fingerprint, source_uri, source_local_uri, source_name, source_kind, source_mtime, source_size) VALUES (?, ?, 'INDEXING', 0, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)",
+            [
+              title,
+              content,
+              totalChunks,
+              fingerprint,
+              source?.uri ?? null,
+              source?.localUri ?? null,
+              source?.name ?? null,
+              source?.kind ?? null,
+              source?.mtime ?? null,
+              source?.size ?? null,
+            ],
+          );
+          await this.db.execute('RELEASE add_document;');
+          return res.insertId!;
+        } catch (e) {
+          await this.db.execute('ROLLBACK TO add_document;');
+          await this.db.execute('RELEASE add_document;');
+          throw e;
+        }
+      });
 
       // Fire-and-forget indexing so UI stays responsive. Progress is persisted in `documents`.
       void this.indexDocument(docId, title, content);
       return docId;
     } catch (e) {
-      try {
-        await this.db.execute('ROLLBACK');
-      } catch {
-        // ignore
-      }
       Logger.error('DocumentService', 'Failed to add document', e);
       throw e;
     }
@@ -154,33 +174,36 @@ export class DocumentService {
       const prepared = chunks.filter((c) => c.content.trim().length > 0);
       const totalChunks = prepared.length + 1; // + title chunk
 
-      await this.db.execute('BEGIN TRANSACTION');
-      const res = await this.db.execute(
-        "INSERT INTO documents (title, content, status, indexed_chunks, total_chunks, updated_at, fingerprint, source_uri, source_local_uri, source_name, source_kind, source_mtime, source_size) VALUES (?, ?, 'INDEXING', 0, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)",
-        [
-          title,
-          fullContent,
-          totalChunks,
-          fingerprint,
-          source?.uri ?? null,
-          source?.localUri ?? null,
-          source?.name ?? null,
-          source?.kind ?? null,
-          source?.mtime ?? null,
-          source?.size ?? null,
-        ],
-      );
-      const docId = res.insertId!;
-      await this.db.execute('COMMIT');
+      const docId = await this.withWriteLock(async () => {
+        await this.db.execute('SAVEPOINT add_document_prepared;');
+        try {
+          const res = await this.db.execute(
+            "INSERT INTO documents (title, content, status, indexed_chunks, total_chunks, updated_at, fingerprint, source_uri, source_local_uri, source_name, source_kind, source_mtime, source_size) VALUES (?, ?, 'INDEXING', 0, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)",
+            [
+              title,
+              fullContent,
+              totalChunks,
+              fingerprint,
+              source?.uri ?? null,
+              source?.localUri ?? null,
+              source?.name ?? null,
+              source?.kind ?? null,
+              source?.mtime ?? null,
+              source?.size ?? null,
+            ],
+          );
+          await this.db.execute('RELEASE add_document_prepared;');
+          return res.insertId!;
+        } catch (e) {
+          await this.db.execute('ROLLBACK TO add_document_prepared;');
+          await this.db.execute('RELEASE add_document_prepared;');
+          throw e;
+        }
+      });
 
       void this.indexDocumentPrepared(docId, title, prepared);
       return docId;
     } catch (e) {
-      try {
-        await this.db.execute('ROLLBACK');
-      } catch {
-        // ignore
-      }
       Logger.error('DocumentService', 'Failed to add document (prepared chunks)', e);
       throw e;
     }
@@ -199,41 +222,44 @@ export class DocumentService {
     const prepared = chunks.filter((c) => c.content.trim().length > 0);
     const totalChunks = prepared.length + 1; // + title chunk
 
-    await this.db.execute('BEGIN TRANSACTION');
-    try {
-      // Clear existing chunks + auxiliary indexes
-      const chunkRows = await this.db.execute('SELECT id FROM chunks WHERE document_id = ?', [docId]);
-      const chunkIds = (chunkRows?.rows || []).map((r: any) => r.id);
-      if (chunkIds.length > 0) {
-        const placeholders = chunkIds.map(() => '?').join(',');
-        await this.db.execute(`DELETE FROM chunks_fts WHERE rowid IN (${placeholders})`, chunkIds);
-        await this.db.execute(`DELETE FROM vec_items WHERE chunk_rowid IN (${placeholders})`, chunkIds);
+    await this.withWriteLock(async () => {
+      await this.db.execute('SAVEPOINT reindex_document;');
+      try {
+        // Clear existing chunks + auxiliary indexes
+        const chunkRows = await this.db.execute('SELECT id FROM chunks WHERE document_id = ?', [docId]);
+        const chunkIds = (chunkRows?.rows || []).map((r: any) => r.id);
+        if (chunkIds.length > 0) {
+          const placeholders = chunkIds.map(() => '?').join(',');
+          await this.db.execute(`DELETE FROM chunks_fts WHERE rowid IN (${placeholders})`, chunkIds);
+          await this.db.execute(`DELETE FROM vec_items WHERE chunk_rowid IN (${placeholders})`, chunkIds);
+        }
+        await this.db.execute('DELETE FROM chunks WHERE document_id = ?', [docId]);
+
+        // Update the document row
+        await this.db.execute(
+          "UPDATE documents SET title = ?, content = ?, status = 'INDEXING', indexed_chunks = 0, total_chunks = ?, error_message = NULL, updated_at = CURRENT_TIMESTAMP, fingerprint = ?, source_uri = ?, source_local_uri = ?, source_name = ?, source_kind = ?, source_mtime = ?, source_size = ? WHERE id = ?",
+          [
+            title,
+            fullContent,
+            totalChunks,
+            fingerprint,
+            source?.uri ?? null,
+            source?.localUri ?? null,
+            source?.name ?? null,
+            source?.kind ?? null,
+            source?.mtime ?? null,
+            source?.size ?? null,
+            docId,
+          ],
+        );
+
+        await this.db.execute('RELEASE reindex_document;');
+      } catch (e) {
+        await this.db.execute('ROLLBACK TO reindex_document;');
+        await this.db.execute('RELEASE reindex_document;');
+        throw e;
       }
-      await this.db.execute('DELETE FROM chunks WHERE document_id = ?', [docId]);
-
-      // Update the document row
-      await this.db.execute(
-        "UPDATE documents SET title = ?, content = ?, status = 'INDEXING', indexed_chunks = 0, total_chunks = ?, error_message = NULL, updated_at = CURRENT_TIMESTAMP, fingerprint = ?, source_uri = ?, source_local_uri = ?, source_name = ?, source_kind = ?, source_mtime = ?, source_size = ? WHERE id = ?",
-        [
-          title,
-          fullContent,
-          totalChunks,
-          fingerprint,
-          source?.uri ?? null,
-          source?.localUri ?? null,
-          source?.name ?? null,
-          source?.kind ?? null,
-          source?.mtime ?? null,
-          source?.size ?? null,
-          docId,
-        ],
-      );
-
-      await this.db.execute('COMMIT');
-    } catch (e) {
-      await this.db.execute('ROLLBACK');
-      throw e;
-    }
+    });
 
     // Fire-and-forget indexing
     void this.indexDocumentPrepared(docId, title, prepared);
@@ -259,53 +285,62 @@ export class DocumentService {
 
         const chunkContent = chunksToIndex[i];
 
-        await this.db.execute('BEGIN TRANSACTION');
-        try {
-          const chunkRes = await this.db.execute(
-            'INSERT INTO chunks (document_id, content) VALUES (?, ?)',
-            [docId, chunkContent],
-          );
-          const chunkRowId = chunkRes.insertId!;
+        await this.withWriteLock(async () => {
+          await this.db.execute('SAVEPOINT index_chunk;');
+          try {
+            const chunkRes = await this.db.execute('INSERT INTO chunks (document_id, content) VALUES (?, ?)', [
+              docId,
+              chunkContent,
+            ]);
+            const rowId = chunkRes.insertId!;
 
-          await this.db.execute('INSERT INTO chunks_fts (rowid, content) VALUES (?, ?)', [
-            chunkRowId,
-            chunkContent,
+            await this.db.execute('INSERT INTO chunks_fts (rowid, content) VALUES (?, ?)', [rowId, chunkContent]);
+
+            const embeddingJSON = await embeddingService.embed(chunkContent);
+            // sqlite-vec vec0 can behave differently than regular tables with respect to ROLLBACK/REPLACE.
+            // Ensure idempotency by clearing any orphan row first (e.g., after a partial failure).
+            await this.db.execute('DELETE FROM vec_items WHERE chunk_rowid = ?', [rowId]);
+            await this.db.execute('INSERT INTO vec_items (chunk_rowid, embedding) VALUES (?, vec_int8(?))', [
+              rowId,
+              embeddingJSON,
+            ]);
+
+            await this.db.execute('RELEASE index_chunk;');
+            return rowId;
+          } catch (e) {
+            await this.db.execute('ROLLBACK TO index_chunk;');
+            await this.db.execute('RELEASE index_chunk;');
+            throw e;
+          }
+        });
+
+        await this.withWriteLock(async () => {
+          await this.db.execute('UPDATE documents SET indexed_chunks = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [
+            i + 1,
+            docId,
           ]);
-
-          const embeddingJSON = await embeddingService.embed(chunkContent);
-          await this.db.execute('INSERT INTO vec_items (chunk_rowid, embedding) VALUES (?, vec_int8(?))', [
-            chunkRowId,
-            embeddingJSON,
-          ]);
-
-          await this.db.execute('COMMIT');
-        } catch (e) {
-          await this.db.execute('ROLLBACK');
-          throw e;
-        }
-
-        await this.db.execute(
-          'UPDATE documents SET indexed_chunks = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [i + 1, docId],
-        );
+        });
 
         // Yield to UI/event loop every chunk to avoid long blocking.
         // eslint-disable-next-line no-await-in-loop
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
 
-      await this.db.execute(
-        "UPDATE documents SET status = 'READY', error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        [docId],
-      );
+      await this.withWriteLock(async () => {
+        await this.db.execute("UPDATE documents SET status = 'READY', error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [
+          docId,
+        ]);
+      });
       Logger.info('DocumentService', `Indexing complete for doc ${docId}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Logger.error('DocumentService', `Indexing failed for doc ${docId}`, e);
-      await this.db.execute(
-        "UPDATE documents SET status = 'FAILED', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        [msg, docId],
-      );
+      await this.withWriteLock(async () => {
+        await this.db.execute("UPDATE documents SET status = 'FAILED', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [
+          msg,
+          docId,
+        ]);
+      });
     }
   }
 
@@ -327,49 +362,58 @@ export class DocumentService {
 
         const { content, page_number } = chunksToIndex[i];
 
-        await this.db.execute('BEGIN TRANSACTION');
-        try {
-          const chunkRes = await this.db.execute(
-            'INSERT INTO chunks (document_id, content, page_number) VALUES (?, ?, ?)',
-            [docId, content, page_number ?? null],
-          );
-          const chunkRowId = chunkRes.insertId!;
+        await this.withWriteLock(async () => {
+          await this.db.execute('SAVEPOINT index_chunk_prepared;');
+          try {
+            const chunkRes = await this.db.execute(
+              'INSERT INTO chunks (document_id, content, page_number) VALUES (?, ?, ?)',
+              [docId, content, page_number ?? null],
+            );
+            const chunkRowId = chunkRes.insertId!;
 
-          await this.db.execute('INSERT INTO chunks_fts (rowid, content) VALUES (?, ?)', [chunkRowId, content]);
+            await this.db.execute('INSERT INTO chunks_fts (rowid, content) VALUES (?, ?)', [chunkRowId, content]);
 
-          const embeddingJSON = await embeddingService.embed(content);
-          await this.db.execute('INSERT INTO vec_items (chunk_rowid, embedding) VALUES (?, vec_int8(?))', [
-            chunkRowId,
-            embeddingJSON,
+            const embeddingJSON = await embeddingService.embed(content);
+            await this.db.execute('DELETE FROM vec_items WHERE chunk_rowid = ?', [chunkRowId]);
+            await this.db.execute('INSERT INTO vec_items (chunk_rowid, embedding) VALUES (?, vec_int8(?))', [
+              chunkRowId,
+              embeddingJSON,
+            ]);
+
+            await this.db.execute('RELEASE index_chunk_prepared;');
+          } catch (e) {
+            await this.db.execute('ROLLBACK TO index_chunk_prepared;');
+            await this.db.execute('RELEASE index_chunk_prepared;');
+            throw e;
+          }
+        });
+
+        await this.withWriteLock(async () => {
+          await this.db.execute('UPDATE documents SET indexed_chunks = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [
+            i + 1,
+            docId,
           ]);
-
-          await this.db.execute('COMMIT');
-        } catch (e) {
-          await this.db.execute('ROLLBACK');
-          throw e;
-        }
-
-        await this.db.execute(
-          'UPDATE documents SET indexed_chunks = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [i + 1, docId],
-        );
+        });
 
         // eslint-disable-next-line no-await-in-loop
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
 
-      await this.db.execute(
-        "UPDATE documents SET status = 'READY', error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        [docId],
-      );
+      await this.withWriteLock(async () => {
+        await this.db.execute("UPDATE documents SET status = 'READY', error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [
+          docId,
+        ]);
+      });
       Logger.info('DocumentService', `Indexing complete for doc ${docId}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Logger.error('DocumentService', `Indexing failed for doc ${docId}`, e);
-      await this.db.execute(
-        "UPDATE documents SET status = 'FAILED', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        [msg, docId],
-      );
+      await this.withWriteLock(async () => {
+        await this.db.execute("UPDATE documents SET status = 'FAILED', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [
+          msg,
+          docId,
+        ]);
+      });
     }
   }
 
@@ -379,22 +423,27 @@ export class DocumentService {
     // and usually don't support automatic cascade if they are external content.
     
     try {
-      await this.db.execute('BEGIN TRANSACTION');
-      
-      const chunks = await this.db.execute('SELECT id FROM chunks WHERE document_id = ?', [docId]);
-      const chunkIds = (chunks?.rows || []).map((r: any) => r.id);
-      
-      if (chunkIds.length > 0) {
-        const placeholders = chunkIds.map(() => '?').join(',');
-        await this.db.execute(`DELETE FROM chunks_fts WHERE rowid IN (${placeholders})`, chunkIds);
-        await this.db.execute(`DELETE FROM vec_items WHERE chunk_rowid IN (${placeholders})`, chunkIds);
-      }
-      
-      await this.db.execute('DELETE FROM documents WHERE id = ?', [docId]);
-      
-      await this.db.execute('COMMIT');
+      await this.withWriteLock(async () => {
+        await this.db.execute('SAVEPOINT delete_document;');
+        try {
+          const chunks = await this.db.execute('SELECT id FROM chunks WHERE document_id = ?', [docId]);
+          const chunkIds = (chunks?.rows || []).map((r: any) => r.id);
+
+          if (chunkIds.length > 0) {
+            const placeholders = chunkIds.map(() => '?').join(',');
+            await this.db.execute(`DELETE FROM chunks_fts WHERE rowid IN (${placeholders})`, chunkIds);
+            await this.db.execute(`DELETE FROM vec_items WHERE chunk_rowid IN (${placeholders})`, chunkIds);
+          }
+
+          await this.db.execute('DELETE FROM documents WHERE id = ?', [docId]);
+          await this.db.execute('RELEASE delete_document;');
+        } catch (e) {
+          await this.db.execute('ROLLBACK TO delete_document;');
+          await this.db.execute('RELEASE delete_document;');
+          throw e;
+        }
+      });
     } catch (e) {
-      await this.db.execute('ROLLBACK');
       Logger.error('DocumentService', 'Failed to delete document', e);
       throw e;
     }

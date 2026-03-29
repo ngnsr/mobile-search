@@ -6,6 +6,7 @@ interface Props {
   documentService: DocumentService;
   onAddPress: () => void;
   onSearchPress: () => void;
+  onStatsPress: () => void;
   onDocumentPress: (doc: Document) => void;
 }
 
@@ -13,6 +14,7 @@ export const DocumentListScreen: React.FC<Props> = ({
   documentService, 
   onAddPress, 
   onSearchPress,
+  onStatsPress,
   onDocumentPress
 }) => {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -70,9 +72,14 @@ export const DocumentListScreen: React.FC<Props> = ({
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Documents</Text>
-        <TouchableOpacity style={styles.searchButton} onPress={onSearchPress}>
-          <Text style={styles.buttonText}>Search</Text>
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity style={styles.statsButton} onPress={onStatsPress}>
+            <Text style={styles.buttonText}>Stats</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.searchButton} onPress={onSearchPress}>
+            <Text style={styles.buttonText}>Search</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
@@ -127,6 +134,8 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   title: { fontSize: 24, fontWeight: 'bold' },
+  headerButtons: { flexDirection: 'row', gap: 10 },
+  statsButton: { backgroundColor: '#9b59b6', padding: 10, borderRadius: 5 },
   searchButton: { backgroundColor: '#3498db', padding: 10, borderRadius: 5 },
   buttonText: { color: '#fff', fontWeight: 'bold' },
   item: { 

@@ -16,6 +16,8 @@ export const SearchScreen: React.FC<Props> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<SearchMode>('hybrid');
+  const [kindFilter, setKindFilter] = useState<'all' | 'pdf' | 'txt' | 'md' | 'manual'>('all');
+  const [dateFilter, setDateFilter] = useState<'all' | '7d' | '30d'>('all');
   const [results, setResults] = useState<SearchDocumentResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -35,7 +37,11 @@ export const SearchScreen: React.FC<Props> = ({
       else setLoading(true);
 
       const nextOffset = append ? offset : 0;
-      const res = await searchService.searchDocuments(query, effectiveMode, PAGE_SIZE, nextOffset);
+      const dateRangeDays = dateFilter === '7d' ? 7 : dateFilter === '30d' ? 30 : null;
+      const res = await searchService.searchDocuments(query, effectiveMode, PAGE_SIZE, nextOffset, {
+        kind: kindFilter,
+        dateRangeDays,
+      });
 
       const nextResults = append ? [...results, ...res.results] : res.results;
       setResults(nextResults);
@@ -118,6 +124,48 @@ export const SearchScreen: React.FC<Props> = ({
             </Text>
           </TouchableOpacity>
         ))}
+      </View>
+
+      <View style={styles.filters}>
+        <View style={styles.filterRow}>
+          <Text style={styles.filterLabel}>Type</Text>
+          {(['all', 'pdf', 'txt', 'md', 'manual'] as const).map((k) => (
+            <TouchableOpacity
+              key={k}
+              style={[styles.filterChip, kindFilter === k && styles.filterChipActive]}
+              onPress={() => {
+                setKindFilter(k);
+                setOffset(0);
+                setHasMore(false);
+                if (query.trim()) handleSearch({ append: false });
+              }}
+            >
+              <Text style={[styles.filterChipText, kindFilter === k && styles.filterChipTextActive]}>
+                {k.toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={styles.filterRow}>
+          <Text style={styles.filterLabel}>Date</Text>
+          {(['all', '7d', '30d'] as const).map((d) => (
+            <TouchableOpacity
+              key={d}
+              style={[styles.filterChip, dateFilter === d && styles.filterChipActive]}
+              onPress={() => {
+                setDateFilter(d);
+                setOffset(0);
+                setHasMore(false);
+                if (query.trim()) handleSearch({ append: false });
+              }}
+            >
+              <Text style={[styles.filterChipText, dateFilter === d && styles.filterChipTextActive]}>
+                {d.toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
       {metrics && (
@@ -207,6 +255,13 @@ const styles = StyleSheet.create({
   activeMode: { backgroundColor: '#3498db' },
   modeText: { color: '#3498db', fontWeight: 'bold' },
   activeModeText: { color: '#fff' },
+  filters: { backgroundColor: '#fff', paddingHorizontal: 10, paddingBottom: 10 },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 8 },
+  filterLabel: { width: 40, fontSize: 12, fontWeight: '700', color: '#2c3e50' },
+  filterChip: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 16, backgroundColor: '#ecf0f1' },
+  filterChipActive: { backgroundColor: '#2ecc71' },
+  filterChipText: { fontSize: 11, color: '#2c3e50', fontWeight: '700' },
+  filterChipTextActive: { color: '#fff' },
   metrics: { padding: 5, backgroundColor: '#eee', alignItems: 'center' },
   metricsText: { fontSize: 11, color: '#666' },
   list: { padding: 10 },
