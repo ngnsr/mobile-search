@@ -1,0 +1,72 @@
+appId: com.client
+---
+# 1. Bypass Login Screen (If Applicable)
+- runFlow:
+    when:
+      visible: "Enter username"
+    commands:
+      - tapOn: "Enter username"
+      - inputText: "admin"
+      - tapOn: "Enter password"
+      - inputText: "admin123"
+      - tapOn: "Login"
+
+- assertVisible: "Military Library RAG"
+
+# 2. Load model only if not already active
+- runFlow:
+    when:
+      visible: "+ Load Model"
+    commands:
+      - tapOn: "+ Load Model"
+      - assertVisible: "Select Model"
+      - runFlow:
+          when:
+            visible: "Download (1.0 GB)"
+          commands:
+            - tapOn: "Download (1.0 GB)"
+            - tapOn: "DOWNLOAD"
+            - extendedWaitUntil:
+                visible: "Load"
+                timeout: 300000
+      - tapOn: "Load"
+      - extendedWaitUntil:
+          visible: "Search offline materials..."
+          timeout: 60000
+
+# 3. Ensure Benchmark button is ready
+- extendedWaitUntil:
+    visible: "Run Benchmark Suite"
+    timeout: 30000
+
+# 4. Trigger the Benchmark Suite
+- tapOn: "Run Benchmark Suite"
+
+# 5. Wait for benchmark to finish — "Benchmark complete!" is a brief toast,
+#    so we wait on the stable result card instead
+- extendedWaitUntil:
+    visible: "Benchmark Averages"
+    timeout: 120000
+
+# 6. Assert benchmark results are shown
+- assertVisible:
+    text: "Speed:.*tok/s"
+- assertVisible:
+    text: "TTFT:.*ms"
+
+# 7. Test search + Ask AI flow
+- tapOn: "Search offline materials..."
+- inputText: "PRT"
+- tapOn: "Search"
+- extendedWaitUntil:
+    visible: "Ask AI (Qwen 2.5 1.5B (Q4))"
+    timeout: 15000
+- tapOn: "Ask AI (Qwen 2.5 1.5B (Q4))"
+- extendedWaitUntil:
+    visible: "AI Answer"
+    timeout: 60000
+- scrollUntilVisible:
+    element: "Was this answer helpful?"
+    direction: DOWN
+- assertVisible: "AI Answer"
+- assertVisible: "Was this answer helpful?"
