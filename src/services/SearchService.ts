@@ -11,6 +11,8 @@ export interface SearchResult {
   fts_rank?: number;
   vec_distance?: number;
   rrf_score?: number;
+  source_local_uri?: string | null;
+  source_kind?: string | null;
 }
 
 export interface SearchDocumentResult {
@@ -100,7 +102,7 @@ export class SearchService {
 
     if (mode === 'bm25') {
       sql = `
-        SELECT c.*, d.title as document_title, bm25(chunks_fts) as fts_rank
+        SELECT c.*, d.title as document_title, d.source_local_uri, d.source_kind, bm25(chunks_fts) as fts_rank
         FROM chunks_fts
         JOIN chunks c ON c.id = chunks_fts.rowid
         JOIN documents d ON d.id = c.document_id
@@ -112,7 +114,7 @@ export class SearchService {
       params = [this.sanitizeFts5Query(query), limit, offset];
     } else if (mode === 'semantic') {
       sql = `
-        SELECT c.*, d.title as document_title, r.distance as vec_distance
+        SELECT c.*, d.title as document_title, d.source_local_uri, d.source_kind, r.distance as vec_distance
         FROM vec_items r
         JOIN chunks c ON c.id = r.chunk_rowid
         JOIN documents d ON d.id = c.document_id
@@ -155,7 +157,7 @@ export class SearchService {
             FROM combined
             GROUP BY rowid
         )
-        SELECT c.*, d.title as document_title, r.rrf_score
+        SELECT c.*, d.title as document_title, d.source_local_uri, d.source_kind, r.rrf_score
         FROM ranked r
         JOIN chunks c ON c.id = r.rowid
         JOIN documents d ON d.id = c.document_id
@@ -176,6 +178,10 @@ export class SearchService {
     const tSearch0 = Date.now();
     const dbResults = await this.db.execute(sql, params);
     const searchMs = Date.now() - tSearch0;
+
+    if (dbResults?.rows && dbResults.rows.length > 0) {
+      console.log('[DEBUG] DB row keys:', Object.keys(dbResults.rows[0]));
+    }
 
     const results = (dbResults?.rows || []) as unknown as SearchResult[];
     return { results, metrics: { embeddingMs, searchMs } };

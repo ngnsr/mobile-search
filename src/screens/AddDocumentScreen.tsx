@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Platform } from 'react-native';
 import { DocumentService } from '../services/DocumentService';
 import { FileIndexingService } from '../services/FileIndexingService';
+import { ENV } from '../config/env';
 
 interface Props {
   documentService: DocumentService;
@@ -19,6 +20,7 @@ export const AddDocumentScreen: React.FC<Props> = ({
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [enhancedPdf, setEnhancedPdf] = useState(false);
 
   const handleSave = async () => {
     if (!title.trim() || !content.trim()) {
@@ -41,7 +43,10 @@ export const AddDocumentScreen: React.FC<Props> = ({
   const handleImportFiles = async () => {
     try {
       setIsSaving(true);
-      const { success, failed } = await fileIndexingService.selectAndIndexFiles();
+      const { success, failed } = await fileIndexingService.selectAndIndexFiles({
+        enhancedPdf,
+        backendUrl: ENV.API_URL,
+      });
       if (success > 0 || failed > 0) {
         Alert.alert('Import Finished', `Successfully indexed ${success} files.${failed > 0 ? ` Failed to index ${failed} files.` : ''}`);
         if (success > 0) onSuccess();
@@ -86,6 +91,16 @@ export const AddDocumentScreen: React.FC<Props> = ({
               <Text style={styles.importButtonText}>Select Folder</Text>
             </TouchableOpacity>
           ) : null}
+        </View>
+        <View style={styles.enhancedRow}>
+          <TouchableOpacity
+            style={[styles.checkbox, enhancedPdf && styles.checkboxChecked]}
+            onPress={() => setEnhancedPdf((v) => !v)}
+            disabled={isSaving}
+          >
+            <Text style={styles.checkboxText}>{enhancedPdf ? '✓' : ''}</Text>
+          </TouchableOpacity>
+          <Text style={styles.enhancedLabel}>Enhanced PDF (cloud conversion)</Text>
         </View>
         <Text style={styles.hint}>
           Supported: .txt, .md, .pdf (beta){Platform.OS === 'android' ? ' • Folder import: iOS only' : ''}
@@ -152,6 +167,31 @@ const styles = StyleSheet.create({
     alignItems: 'center' 
   },
   importButtonText: { color: '#fff', fontWeight: 'bold' },
+  enhancedRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#3498db',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  checkboxChecked: { backgroundColor: '#3498db' },
+  checkboxText: { color: '#fff', fontWeight: '800' },
+  enhancedLabel: { fontSize: 12, color: '#2c3e50', fontWeight: '700' },
+  backendRow: { marginTop: 10 },
+  backendLabel: { fontSize: 12, color: '#666', marginBottom: 6, fontWeight: '700' },
+  backendInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 10,
+    backgroundColor: '#fff',
+    fontSize: 12,
+  },
+  backendHint: { fontSize: 11, color: '#888', marginTop: 6 },
   hint: { fontSize: 12, color: '#7f8c8d', marginTop: 10, textAlign: 'center' },
   divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
   form: { padding: 20 },

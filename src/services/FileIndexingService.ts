@@ -4,12 +4,16 @@ import RNFS from 'react-native-fs';
 import { DocumentService, DocumentSource } from './DocumentService';
 import { Logger } from '../utils/logger';
 import { PDFService } from './PDFService';
+import { RemoteConversionService } from './RemoteConversionService';
+import { ENV } from '../config/env';
 
 export class FileIndexingService {
   private documentService: DocumentService;
+  private remoteConversion: RemoteConversionService;
 
-  constructor(documentService: DocumentService) {
+  constructor(documentService: DocumentService, opts?: { backendUrl?: string }) {
     this.documentService = documentService;
+    this.remoteConversion = new RemoteConversionService(opts?.backendUrl ?? ENV.API_URL);
   }
 
   private sanitizeFileName(name: string, index: number): string {
@@ -76,7 +80,10 @@ export class FileIndexingService {
     }
   }
 
-  async selectAndIndexFiles(): Promise<{ success: number; failed: number }> {
+  async selectAndIndexFiles(options?: {
+    enhancedPdf?: boolean;
+    backendUrl?: string;
+  }): Promise<{ success: number; failed: number }> {
     try {
       const results = await pick({
         mode: 'open',
@@ -87,6 +94,10 @@ export class FileIndexingService {
 
       let success = 0;
       let failed = 0;
+
+      if (options?.backendUrl) {
+        this.remoteConversion = new RemoteConversionService(options.backendUrl);
+      }
 
       // Convert content:// URIs to local files on Android for RNFS compatibility.
       const copyResponses = await keepLocalCopy({
@@ -103,12 +114,18 @@ export class FileIndexingService {
       for (const res of results) {
         try {
           const localUri = localUriBySource.get(res.uri) ?? res.uri;
-          await this.indexFile(localUri, res.name || 'Untitled', {
+          await this.indexFile(
+            localUri,
+            res.name || 'Untitled',
+            {
             uri: res.uri,
             localUri,
             name: res.name ?? null,
             kind: (res.name?.split('.').pop()?.toLowerCase() as any) ?? null,
-          });
+            ...(await this.readFileStat(localUri)),
+            },
+            !!options?.enhancedPdf,
+          );
           success++;
         } catch (e) {
           Logger.error('FileIndexingService', `Failed to index file: ${res.name}`, e);
@@ -127,7 +144,12 @@ export class FileIndexingService {
     }
   }
 
-  private async indexFile(uri: string, name: string, source?: DocumentSource): Promise<void> {
+  private async indexFile(
+    uri: string,
+    name: string,
+    source?: DocumentSource,
+    enhancedPdf: boolean = false,
+  ): Promise<void> {
     const extension = name.split('.').pop()?.toLowerCase();
     let content = '';
 
@@ -136,10 +158,35 @@ export class FileIndexingService {
       await this.documentService.addDocument(name, content, {
         ...source,
         kind: extension,
-        ...(await this.readFileStat(uri)),
       });
       return;
     } else if (extension === 'pdf') {
+      if (enhancedPdf) {
+        try {
+          Logger.info('FileIndexingService', `Remote converting PDF: ${uri}`);
+          const remote = await this.remoteConversion.convertPdfToPages(uri, name);
+          const pages = remote.pages ?? [];
+          const text = (remote.text ?? pages.join('\n\n')).trim();
+          if (text) {
+            const prepared =
+              pages.length > 1
+                ? pages.flatMap((pageText, idx) => {
+                    const chunks = this.chunkText(pageText, 300);
+                    return chunks.map((c) => ({ content: c, page_number: idx + 1 }));
+                  })
+                : this.chunkText(text, 300).map((c) => ({ content: c, page_number: null }));
+
+            await this.documentService.addDocumentFromPreparedChunks(name, text, prepared, {
+              ...source,
+              kind: 'pdf',
+            });
+            return;
+          }
+        } catch (e) {
+          Logger.warn('FileIndexingService', 'Remote PDF conversion failed, falling back to local extraction', e);
+        }
+      }
+
       const pages = await this.readPdfPages(uri);
       content = pages.join('\n\n');
       if (content.trim()) {
@@ -150,7 +197,6 @@ export class FileIndexingService {
         await this.documentService.addDocumentFromPreparedChunks(name, content, prepared, {
           ...source,
           kind: 'pdf',
-          ...(await this.readFileStat(uri)),
         });
         return;
       }

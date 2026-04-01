@@ -7,11 +7,12 @@ import { AddDocumentScreen } from './screens/AddDocumentScreen';
 import { SearchScreen } from './screens/SearchScreen';
 import { ResultDetailScreen } from './screens/ResultDetailScreen';
 import { StatsScreen } from './screens/StatsScreen';
+import { AssistantScreen } from './screens/AssistantScreen';
 import { Document } from './services/DocumentService';
 import { SearchDocumentResult, SearchMode } from './services/SearchService';
 import { StatsService } from './services/StatsService';
 
-type Screen = 'list' | 'add' | 'search' | 'detail' | 'stats';
+type Screen = 'list' | 'add' | 'search' | 'detail' | 'stats' | 'assistant';
 
 export default function App() {
   const { isReady, status, db, documentService, searchService, fileIndexingService } = useAppInitialization();
@@ -40,6 +41,7 @@ export default function App() {
             onAddPress={() => setCurrentScreen('add')}
             onSearchPress={() => setCurrentScreen('search')}
             onStatsPress={() => setCurrentScreen('stats')}
+            onAssistantPress={() => setCurrentScreen('assistant')}
             onDocumentPress={(doc) => {
               setSelectedItem({ kind: 'doc', doc });
               setCurrentScreen('detail');
@@ -87,6 +89,8 @@ export default function App() {
             onBack={() => setCurrentScreen('list')}
           />
         );
+      case 'assistant':
+        return <AssistantScreen searchService={searchService!} onBack={() => setCurrentScreen('list')} />;
       default:
         return null;
     }

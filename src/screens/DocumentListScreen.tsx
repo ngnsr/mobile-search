@@ -7,6 +7,7 @@ interface Props {
   onAddPress: () => void;
   onSearchPress: () => void;
   onStatsPress: () => void;
+  onAssistantPress: () => void;
   onDocumentPress: (doc: Document) => void;
 }
 
@@ -15,6 +16,7 @@ export const DocumentListScreen: React.FC<Props> = ({
   onAddPress, 
   onSearchPress,
   onStatsPress,
+  onAssistantPress,
   onDocumentPress
 }) => {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -73,6 +75,9 @@ export const DocumentListScreen: React.FC<Props> = ({
       <View style={styles.header}>
         <Text style={styles.title}>Documents</Text>
         <View style={styles.headerButtons}>
+          <TouchableOpacity style={styles.assistantButton} onPress={onAssistantPress}>
+            <Text style={styles.buttonText}>Assistant</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.statsButton} onPress={onStatsPress}>
             <Text style={styles.buttonText}>Stats</Text>
           </TouchableOpacity>
@@ -135,6 +140,7 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 24, fontWeight: 'bold' },
   headerButtons: { flexDirection: 'row', gap: 10 },
+  assistantButton: { backgroundColor: '#e67e22', padding: 10, borderRadius: 5 },
   statsButton: { backgroundColor: '#9b59b6', padding: 10, borderRadius: 5 },
   searchButton: { backgroundColor: '#3498db', padding: 10, borderRadius: 5 },
   buttonText: { color: '#fff', fontWeight: 'bold' },
