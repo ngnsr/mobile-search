@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { StatsService } from '../services/StatsService';
 import { BarChart } from '../components/charts/BarChart';
 import { Sparkline } from '../components/charts/Sparkline';
 import { StackedBar } from '../components/charts/StackedBar';
 
 export function StatsScreen({ statsService, onBack }: { statsService: StatsService; onBack: () => void }) {
+  const { t } = useTranslation();
   const [byKind, setByKind] = useState<Array<{ kind: string; count: number }>>([]);
   const [searchByDay, setSearchByDay] = useState<Array<{ day: string; count: number }>>([]);
   const [searchByMode, setSearchByMode] = useState<Array<{ mode: string; count: number }>>([]);
@@ -73,33 +75,33 @@ export function StatsScreen({ statsService, onBack }: { statsService: StatsServi
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack}>
-          <Text style={styles.backButton}>← Back</Text>
+          <Text style={styles.backButton}>← {t('common.back')}</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Stats</Text>
+        <Text style={styles.title}>{t('stats.title')}</Text>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Documents by Type (Bar Chart)</Text>
+        <Text style={styles.cardTitle}>{t('stats.documentsByKind')}</Text>
         <BarChart data={barData} />
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Searches (Last 7 Days) (Bar Chart)</Text>
+        <Text style={styles.cardTitle}>{t('stats.searchesByDay')}</Text>
         <BarChart data={searchesByDayBars} />
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Search Mode Distribution (Stacked Bar)</Text>
+        <Text style={styles.cardTitle}>{t('stats.modeDistribution')}</Text>
         <StackedBar data={modeStack} />
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Search Latency (Sparkline)</Text>
+        <Text style={styles.cardTitle}>{t('stats.latencySparkline')}</Text>
         <Sparkline values={series.map((s) => s.total_ms)} />
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Avg Latency by Mode (Bar Chart)</Text>
+        <Text style={styles.cardTitle}>{t('stats.avgLatency')}</Text>
         <BarChart data={avgBars} />
       </View>
     </ScrollView>

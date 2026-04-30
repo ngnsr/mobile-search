@@ -75,9 +75,16 @@ export class SearchService {
   }
 
   private sanitizeFts5Query(query: string): string {
-    const cleaned = query.replace(/[^\w\s]/g, ' ').trim();
+    // Preserve letters (including Unicode/Cyrillic), numbers and whitespace.
+    // Replace punctuation and special FTS5 characters with spaces.
+    const cleaned = query.replace(/[^\p{L}\p{N}\s]/gu, ' ').trim();
     if (!cleaned) return '""';
-    return `"${cleaned}"`;
+    
+    const terms = cleaned.split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return '""';
+    
+    // Wrap each term in quotes and add a wildcard suffix.
+    return terms.map(term => `"${term}"*`).join(' ');
   }
 
   public async search(

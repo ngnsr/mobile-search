@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert, Keyboard } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { SearchService, SearchDocumentResult, SearchMode, SearchDocumentsResponse } from '../services/SearchService';
 import { Logger } from '../utils/logger';
 
@@ -14,6 +15,7 @@ export const SearchScreen: React.FC<Props> = ({
   onBack,
   onResultPress
 }) => {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<SearchMode>('hybrid');
   const [kindFilter, setKindFilter] = useState<'all' | 'pdf' | 'txt' | 'md' | 'manual'>('all');
@@ -54,7 +56,7 @@ export const SearchScreen: React.FC<Props> = ({
       // Surface a message and log details for debugging.
       Logger.error('SearchScreen', 'Search failed', e);
       const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('Error', `Search failed: ${msg}\n\nTry reloading the app.`);
+      Alert.alert(t('common.error'), `${t('search.errorFailed', { defaultValue: 'Search failed' })}: ${msg}\n\n${t('search.tryReloading', { defaultValue: 'Try reloading the app.' })}`);
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -70,13 +72,18 @@ export const SearchScreen: React.FC<Props> = ({
       }}
     >
       <Text style={styles.itemTitle} numberOfLines={1}>{item.document_title}</Text>
-      {item.page_number ? <Text style={styles.itemSubtitle}>Page {item.page_number}</Text> : null}
+      {item.page_number ? <Text style={styles.itemSubtitle}>{t('search.page', { page: item.page_number })}</Text> : null}
       <Text style={styles.itemContent} numberOfLines={3}>{item.snippet}</Text>
       <View style={styles.meta}>
-        <Text style={styles.metaText}>{mode === 'semantic' ? 'Similar chunks' : 'Matches'}: {item.hit_chunks}</Text>
+        <Text style={styles.metaText}>{mode === 'semantic' ? t('search.similarParagraphs') : t('search.matchingParagraphs')}: {item.hit_chunks}</Text>
         {item.rrf_score !== undefined ? <Text style={styles.metaText}>RRF: {item.rrf_score.toFixed(4)}</Text> : null}
         {item.fts_rank !== undefined ? <Text style={styles.metaText}>BM25: {item.fts_rank.toFixed(2)}</Text> : null}
-        {item.vec_distance !== undefined ? <Text style={styles.metaText}>Vec: {item.vec_distance.toFixed(4)}</Text> : null}
+        {item.vec_distance !== undefined ? (
+          <Text style={styles.metaText}>
+            Sim: {Math.max(0, Math.min(100, 100 - Math.sqrt(item.vec_distance) * 6)).toFixed(1)}%
+            <Text style={{ fontSize: 10, color: '#aaa' }}> (d:{item.vec_distance.toFixed(1)})</Text>
+          </Text>
+        ) : null}
       </View>
     </TouchableOpacity>
   );
@@ -85,9 +92,9 @@ export const SearchScreen: React.FC<Props> = ({
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack}>
-          <Text style={styles.backButton}>← Back</Text>
+          <Text style={styles.backButton}>← {t('common.back')}</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Search</Text>
+        <Text style={styles.title}>{t('search.title')}</Text>
       </View>
 
       <View style={styles.searchBar}>
@@ -95,11 +102,11 @@ export const SearchScreen: React.FC<Props> = ({
           style={styles.input}
           value={query}
           onChangeText={setQuery}
-          placeholder="Enter search query..."
+          placeholder={t('search.queryPlaceholder')}
           onSubmitEditing={handleSearch}
         />
         <TouchableOpacity style={styles.searchButton} onPress={handleSearch}>
-          <Text style={styles.searchButtonText}>Search</Text>
+          <Text style={styles.searchButtonText}>{t('common.search')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -128,7 +135,7 @@ export const SearchScreen: React.FC<Props> = ({
 
       <View style={styles.filters}>
         <View style={styles.filterRow}>
-          <Text style={styles.filterLabel}>Type</Text>
+          <Text style={styles.filterLabel}>{t('search.type')}</Text>
           {(['all', 'pdf', 'txt', 'md', 'manual'] as const).map((k) => (
             <TouchableOpacity
               key={k}
@@ -148,7 +155,7 @@ export const SearchScreen: React.FC<Props> = ({
         </View>
 
         <View style={styles.filterRow}>
-          <Text style={styles.filterLabel}>Date</Text>
+          <Text style={styles.filterLabel}>{t('search.date')}</Text>
           {(['all', '7d', '30d'] as const).map((d) => (
             <TouchableOpacity
               key={d}
@@ -171,7 +178,7 @@ export const SearchScreen: React.FC<Props> = ({
       {metrics && (
         <View style={styles.metrics}>
           <Text style={styles.metricsText}>
-            Embedding: {metrics.embeddingMs}ms | Search: {metrics.searchMs}ms
+            {t('search.metrics', { embedding: metrics.embeddingMs, search: metrics.searchMs })}
           </Text>
         </View>
       )}
@@ -198,7 +205,7 @@ export const SearchScreen: React.FC<Props> = ({
           }
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text>No results found.</Text>
+              <Text>{t('search.noResults')}</Text>
             </View>
           }
         />

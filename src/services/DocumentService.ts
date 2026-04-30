@@ -116,7 +116,7 @@ export class DocumentService {
       }
 
       const chunks = this.chunkText(content, 300).filter((c) => c.trim().length > 0);
-      const totalChunks = chunks.length + 1; // + title chunk
+      const totalChunks = chunks.length;
 
       const docId = await this.withWriteLock(async () => {
         await this.db.execute('SAVEPOINT add_document;');
@@ -146,7 +146,7 @@ export class DocumentService {
       });
 
       // Fire-and-forget indexing so UI stays responsive. Progress is persisted in `documents`.
-      void this.indexDocument(docId, title, content);
+      void this.indexDocument(docId, content);
       return docId;
     } catch (e) {
       Logger.error('DocumentService', 'Failed to add document', e);
@@ -172,7 +172,7 @@ export class DocumentService {
       }
 
       const prepared = chunks.filter((c) => c.content.trim().length > 0);
-      const totalChunks = prepared.length + 1; // + title chunk
+      const totalChunks = prepared.length;
 
       const docId = await this.withWriteLock(async () => {
         await this.db.execute('SAVEPOINT add_document_prepared;');
@@ -201,7 +201,7 @@ export class DocumentService {
         }
       });
 
-      void this.indexDocumentPrepared(docId, title, prepared);
+      void this.indexDocumentPrepared(docId, prepared);
       return docId;
     } catch (e) {
       Logger.error('DocumentService', 'Failed to add document (prepared chunks)', e);
@@ -220,7 +220,7 @@ export class DocumentService {
 
     const fingerprint = this.buildFingerprint(title, fullContent);
     const prepared = chunks.filter((c) => c.content.trim().length > 0);
-    const totalChunks = prepared.length + 1; // + title chunk
+    const totalChunks = prepared.length;
 
     await this.withWriteLock(async () => {
       await this.db.execute('SAVEPOINT reindex_document;');
@@ -229,9 +229,12 @@ export class DocumentService {
         const chunkRows = await this.db.execute('SELECT id FROM chunks WHERE document_id = ?', [docId]);
         const chunkIds = (chunkRows?.rows || []).map((r: any) => r.id);
         if (chunkIds.length > 0) {
-          const placeholders = chunkIds.map(() => '?').join(',');
-          await this.db.execute(`DELETE FROM chunks_fts WHERE rowid IN (${placeholders})`, chunkIds);
-          await this.db.execute(`DELETE FROM vec_items WHERE chunk_rowid IN (${placeholders})`, chunkIds);
+          for (let i = 0; i < chunkIds.length; i += 500) {
+            const batch = chunkIds.slice(i, i + 500);
+            const placeholders = batch.map(() => '?').join(',');
+            await this.db.execute(`DELETE FROM chunks_fts WHERE rowid IN (${placeholders})`, batch);
+            await this.db.execute(`DELETE FROM vec_items WHERE chunk_rowid IN (${placeholders})`, batch);
+          }
         }
         await this.db.execute('DELETE FROM chunks WHERE document_id = ?', [docId]);
 
@@ -262,12 +265,11 @@ export class DocumentService {
     });
 
     // Fire-and-forget indexing
-    void this.indexDocumentPrepared(docId, title, prepared);
+    void this.indexDocumentPrepared(docId, prepared);
   }
 
-  private async indexDocument(docId: number, title: string, content: string): Promise<void> {
-    const chunks = this.chunkText(content, 300).filter((c) => c.trim().length > 0);
-    const chunksToIndex = [`[TITLE] ${title}`, ...chunks];
+  private async indexDocument(docId: number, content: string): Promise<void> {
+    const chunksToIndex = this.chunkText(content, 300).filter((c) => c.trim().length > 0);
 
     Logger.info('DocumentService', `Indexing document ${docId}: ${chunksToIndex.length} chunks`);
 
@@ -344,8 +346,8 @@ export class DocumentService {
     }
   }
 
-  private async indexDocumentPrepared(docId: number, title: string, chunks: PreparedChunk[]): Promise<void> {
-    const chunksToIndex: PreparedChunk[] = [{ content: `[TITLE] ${title}`, page_number: null }, ...chunks];
+  private async indexDocumentPrepared(docId: number, chunks: PreparedChunk[]): Promise<void> {
+    const chunksToIndex: PreparedChunk[] = chunks;
 
     Logger.info('DocumentService', `Indexing document ${docId}: ${chunksToIndex.length} chunks (prepared)`);
 
@@ -430,9 +432,12 @@ export class DocumentService {
           const chunkIds = (chunks?.rows || []).map((r: any) => r.id);
 
           if (chunkIds.length > 0) {
-            const placeholders = chunkIds.map(() => '?').join(',');
-            await this.db.execute(`DELETE FROM chunks_fts WHERE rowid IN (${placeholders})`, chunkIds);
-            await this.db.execute(`DELETE FROM vec_items WHERE chunk_rowid IN (${placeholders})`, chunkIds);
+            for (let i = 0; i < chunkIds.length; i += 500) {
+              const batch = chunkIds.slice(i, i + 500);
+              const placeholders = batch.map(() => '?').join(',');
+              await this.db.execute(`DELETE FROM chunks_fts WHERE rowid IN (${placeholders})`, batch);
+              await this.db.execute(`DELETE FROM vec_items WHERE chunk_rowid IN (${placeholders})`, batch);
+            }
           }
 
           await this.db.execute('DELETE FROM documents WHERE id = ?', [docId]);

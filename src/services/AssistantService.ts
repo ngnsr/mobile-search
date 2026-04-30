@@ -4,7 +4,7 @@ import EventSource from 'react-native-sse';
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
 export class AssistantService {
-  async chat(params: { model: string; messages: ChatMessage[]; onChunk?: (text: string) => void }): Promise<string> {
+  async chat(params: { model: string; messages: ChatMessage[]; temperature?: number; onChunk?: (text: string) => void }): Promise<string> {
     if (!params.onChunk) {
       const res = await fetch(`${ENV.API_URL}/chat/completions`, {
         method: 'POST',
@@ -14,7 +14,7 @@ export class AssistantService {
         body: JSON.stringify({
           model: params.model,
           messages: params.messages,
-          temperature: 0.2,
+          temperature: params.temperature ?? 0.0,
         }),
       });
 
@@ -40,7 +40,7 @@ export class AssistantService {
         body: JSON.stringify({
           model: params.model,
           messages: params.messages,
-          temperature: 0.2,
+          temperature: params.temperature ?? 0.0,
           stream: true,
         }),
       });

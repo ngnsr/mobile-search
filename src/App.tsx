@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import './i18n';
+import { useTranslation } from 'react-i18next';
 import { useAppInitialization } from './hooks/useAppInitialization';
 import { DocumentListScreen } from './screens/DocumentListScreen';
 import { AddDocumentScreen } from './screens/AddDocumentScreen';
@@ -8,11 +10,13 @@ import { SearchScreen } from './screens/SearchScreen';
 import { ResultDetailScreen } from './screens/ResultDetailScreen';
 import { StatsScreen } from './screens/StatsScreen';
 import { AssistantScreen } from './screens/AssistantScreen';
+import { LegalScreen } from './screens/LegalScreen';
+import { ManualScreen } from './screens/ManualScreen';
 import { Document } from './services/DocumentService';
 import { SearchDocumentResult, SearchMode } from './services/SearchService';
 import { StatsService } from './services/StatsService';
 
-type Screen = 'list' | 'add' | 'search' | 'detail' | 'stats' | 'assistant';
+type Screen = 'list' | 'add' | 'search' | 'detail' | 'stats' | 'assistant' | 'legal' | 'manual';
 
 export default function App() {
   const { isReady, status, db, documentService, searchService, fileIndexingService } = useAppInitialization();
@@ -22,6 +26,8 @@ export default function App() {
     | { kind: 'result'; result: SearchDocumentResult; query: string; mode: SearchMode }
     | null
   >(null);
+
+  const { t } = useTranslation();
 
   if (!isReady) {
     return (
@@ -42,6 +48,8 @@ export default function App() {
             onSearchPress={() => setCurrentScreen('search')}
             onStatsPress={() => setCurrentScreen('stats')}
             onAssistantPress={() => setCurrentScreen('assistant')}
+            onLegalPress={() => setCurrentScreen('legal')}
+            onManualPress={() => setCurrentScreen('manual')}
             onDocumentPress={(doc) => {
               setSelectedItem({ kind: 'doc', doc });
               setCurrentScreen('detail');
@@ -91,6 +99,10 @@ export default function App() {
         );
       case 'assistant':
         return <AssistantScreen searchService={searchService!} onBack={() => setCurrentScreen('list')} />;
+      case 'legal':
+        return <LegalScreen onBack={() => setCurrentScreen('list')} />;
+      case 'manual':
+        return <ManualScreen onBack={() => setCurrentScreen('list')} />;
       default:
         return null;
     }

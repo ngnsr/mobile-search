@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { DocumentService } from '../services/DocumentService';
 import { FileIndexingService } from '../services/FileIndexingService';
 import { ENV } from '../config/env';
@@ -17,24 +19,26 @@ export const AddDocumentScreen: React.FC<Props> = ({
   onBack,
   onSuccess
 }) => {
+  const { t } = useTranslation();
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [enhancedPdf, setEnhancedPdf] = useState(false);
+  const [manualCollapsed, setManualCollapsed] = useState(true);
 
   const handleSave = async () => {
     if (!title.trim() || !content.trim()) {
-      Alert.alert('Error', 'Title and content are required');
+      Alert.alert(t('common.error'), t('addDocument.errorNoTitle'));
       return;
     }
 
     try {
       setIsSaving(true);
       await documentService.addDocument(title, content);
-      Alert.alert('Success', 'Document added successfully');
+      Alert.alert(t('common.success', 'Success'), t('addDocument.success'));
       onSuccess();
     } catch {
-      Alert.alert('Error', 'Failed to add document');
+      Alert.alert(t('common.error'), t('addDocument.errorFailed'));
     } finally {
       setIsSaving(false);
     }
@@ -48,7 +52,10 @@ export const AddDocumentScreen: React.FC<Props> = ({
         backendUrl: ENV.API_URL,
       });
       if (success > 0 || failed > 0) {
-        Alert.alert('Import Finished', `Successfully indexed ${success} files.${failed > 0 ? ` Failed to index ${failed} files.` : ''}`);
+        Alert.alert(
+          t('addDocument.importFinished'),
+          t('addDocument.importSuccess', { success }) + (failed > 0 ? t('addDocument.importFailed', { failed }) : '')
+        );
         if (success > 0) onSuccess();
       }
     } catch {
@@ -58,162 +65,182 @@ export const AddDocumentScreen: React.FC<Props> = ({
     }
   };
 
-  const handleImportFolder = async () => {
-    try {
-      setIsSaving(true);
-      const { success, failed } = await fileIndexingService.selectAndIndexFolder();
-      Alert.alert('Import Finished', `Successfully indexed ${success} files from folder.${failed > 0 ? ` Failed: ${failed}` : ''}`);
-      if (success > 0) onSuccess();
-    } catch {
-      // Error handled in service or user cancelled
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   return (
-    <ScrollView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack}>
-          <Text style={styles.backButton}>← Back</Text>
+        <TouchableOpacity onPress={onBack} style={styles.backButtonBox}>
+          <Text style={styles.backButton}>← {t('common.back')}</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Add Document</Text>
+        <Text style={styles.title}>{t('addDocument.title')}</Text>
       </View>
 
-      <View style={styles.importSection}>
-        <Text style={styles.sectionTitle}>Import from Device</Text>
-        <View style={styles.importButtons}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>{t('addDocument.importTitle')}</Text>
+          <Text style={styles.sectionSubtitle}>{t('addDocument.importSubtitle')}</Text>
+          
           <TouchableOpacity style={styles.importButton} onPress={handleImportFiles} disabled={isSaving}>
-            <Text style={styles.importButtonText}>Select Files</Text>
+            <Text style={styles.importButtonText}>{t('addDocument.selectFiles')}</Text>
           </TouchableOpacity>
-          {Platform.OS !== 'android' ? (
-            <TouchableOpacity style={styles.importButton} onPress={handleImportFolder} disabled={isSaving}>
-              <Text style={styles.importButtonText}>Select Folder</Text>
+
+          <View style={styles.enhancedRow}>
+            <TouchableOpacity
+              style={[styles.checkbox, enhancedPdf && styles.checkboxChecked]}
+              onPress={() => setEnhancedPdf((v) => !v)}
+              disabled={isSaving}
+            >
+              <Text style={styles.checkboxText}>{enhancedPdf ? '✓' : ''}</Text>
             </TouchableOpacity>
-          ) : null}
+            <View>
+              <Text style={styles.enhancedLabel}>{t('addDocument.enhancedPdf')}</Text>
+              <Text style={styles.enhancedSub}>{t('addDocument.enhancedPdfSub')}</Text>
+            </View>
+          </View>
         </View>
-        <View style={styles.enhancedRow}>
-          <TouchableOpacity
-            style={[styles.checkbox, enhancedPdf && styles.checkboxChecked]}
-            onPress={() => setEnhancedPdf((v) => !v)}
-            disabled={isSaving}
+
+        <View style={styles.card}>
+          <TouchableOpacity 
+            style={styles.manualHeader} 
+            onPress={() => setManualCollapsed(!manualCollapsed)}
+            activeOpacity={0.6}
           >
-            <Text style={styles.checkboxText}>{enhancedPdf ? '✓' : ''}</Text>
+            <View>
+              <Text style={styles.sectionTitle}>{t('addDocument.manualEntry')}</Text>
+              {manualCollapsed && <Text style={styles.sectionSubtitle}>{t('addDocument.manualSubtitle')}</Text>}
+            </View>
+            <Text style={styles.collapseIcon}>{manualCollapsed ? '＋' : '－'}</Text>
           </TouchableOpacity>
-          <Text style={styles.enhancedLabel}>Enhanced PDF (cloud conversion)</Text>
-        </View>
-        <Text style={styles.hint}>
-          Supported: .txt, .md, .pdf (beta){Platform.OS === 'android' ? ' • Folder import: iOS only' : ''}
-        </Text>
-      </View>
+          
+          {!manualCollapsed && (
+            <View style={styles.form}>
+              <Text style={styles.label}>{t('addDocument.docTitle')}</Text>
+              <TextInput
+                style={styles.input}
+                value={title}
+                onChangeText={setTitle}
+                placeholder={t('addDocument.docTitlePlaceholder')}
+                placeholderTextColor="#94a3b8"
+              />
 
-      <View style={styles.divider} />
+              <Text style={styles.label}>{t('addDocument.docContent')}</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                value={content}
+                onChangeText={setContent}
+                placeholder={t('addDocument.docContentPlaceholder')}
+                placeholderTextColor="#94a3b8"
+                multiline
+                numberOfLines={10}
+              />
 
-      <View style={styles.form}>
-        <Text style={styles.sectionTitle}>Manual Entry</Text>
-        <Text style={styles.label}>Title</Text>
-        <TextInput
-          style={styles.input}
-          value={title}
-          onChangeText={setTitle}
-          placeholder="Document Title"
-        />
-
-        <Text style={styles.label}>Content</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          value={content}
-          onChangeText={setContent}
-          placeholder="Document Content"
-          multiline
-          numberOfLines={10}
-        />
-
-        <TouchableOpacity 
-          style={[styles.saveButton, isSaving && styles.disabledButton]} 
-          onPress={handleSave}
-          disabled={isSaving}
-        >
-          {isSaving ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.saveButtonText}>Save Document</Text>
+              <TouchableOpacity 
+                style={[styles.saveButton, isSaving && styles.disabledButton]} 
+                onPress={handleSave}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>{t('addDocument.saveDocument')}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           )}
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
   header: { 
     flexDirection: 'row', 
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#f1f5f9',
   },
-  backButton: { fontSize: 18, color: '#3498db', marginRight: 20 },
-  title: { fontSize: 20, fontWeight: 'bold' },
-  importSection: { padding: 20, backgroundColor: '#f9f9f9' },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#2c3e50' },
-  importButtons: { flexDirection: 'row', justifyContent: 'space-between' },
-  importButton: { 
-    backgroundColor: '#3498db', 
-    padding: 12, 
-    borderRadius: 8, 
-    flex: 0.48, 
-    alignItems: 'center' 
-  },
-  importButtonText: { color: '#fff', fontWeight: 'bold' },
-  enhancedRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
+  backButtonBox: { padding: 4 },
+  backButton: { fontSize: 16, color: '#6366f1', fontWeight: 'bold' },
+  title: { fontSize: 20, fontWeight: '800', color: '#1e293b', marginLeft: 16 },
+  scroll: { flex: 1 },
+  scrollContent: { padding: 16, gap: 16 },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
     borderWidth: 1,
-    borderColor: '#3498db',
+    borderColor: '#f1f5f9',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+  },
+  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#0f172a', marginBottom: 4 },
+  sectionSubtitle: { fontSize: 13, color: '#64748b', marginBottom: 20 },
+  importButton: { 
+    backgroundColor: '#6366f1', 
+    paddingVertical: 14, 
+    borderRadius: 12, 
+    alignItems: 'center',
+    shadowColor: '#6366f1',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  importButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  enhancedRow: { flexDirection: 'row', alignItems: 'center', marginTop: 20, backgroundColor: '#f8fafc', padding: 12, borderRadius: 12 },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#6366f1',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    marginRight: 12,
   },
-  checkboxChecked: { backgroundColor: '#3498db' },
-  checkboxText: { color: '#fff', fontWeight: '800' },
-  enhancedLabel: { fontSize: 12, color: '#2c3e50', fontWeight: '700' },
-  backendRow: { marginTop: 10 },
-  backendLabel: { fontSize: 12, color: '#666', marginBottom: 6, fontWeight: '700' },
-  backendInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 10,
-    backgroundColor: '#fff',
-    fontSize: 12,
-  },
-  backendHint: { fontSize: 11, color: '#888', marginTop: 6 },
-  hint: { fontSize: 12, color: '#7f8c8d', marginTop: 10, textAlign: 'center' },
-  divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
-  form: { padding: 20 },
-  label: { fontSize: 14, fontWeight: 'bold', marginBottom: 5, color: '#7f8c8d' },
+  checkboxChecked: { backgroundColor: '#6366f1' },
+  checkboxText: { color: '#fff', fontWeight: '900', fontSize: 14 },
+  enhancedLabel: { fontSize: 14, color: '#1e293b', fontWeight: 'bold' },
+  enhancedSub: { fontSize: 11, color: '#94a3b8' },
+  form: { gap: 16 },
+  label: { fontSize: 13, fontWeight: '700', color: '#64748b', marginBottom: 8, marginTop: 16 },
   input: { 
     borderWidth: 1, 
-    borderColor: '#ddd', 
-    borderRadius: 8, 
-    padding: 12, 
-    fontSize: 16,
-    marginBottom: 20,
+    borderColor: '#e2e8f0', 
+    borderRadius: 12, 
+    padding: 14, 
+    fontSize: 15,
+    color: '#1e293b',
+    backgroundColor: '#fff',
   },
   textArea: { 
-    height: 200, 
+    height: 160, 
     textAlignVertical: 'top' 
   },
   saveButton: { 
-    backgroundColor: '#2ecc71', 
-    padding: 15, 
-    borderRadius: 8, 
-    alignItems: 'center' 
+    backgroundColor: '#10b981', 
+    paddingVertical: 16, 
+    borderRadius: 12, 
+    alignItems: 'center',
+    marginTop: 24,
   },
-  saveButtonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  saveButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   disabledButton: { opacity: 0.6 },
+  manualHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  collapseIcon: {
+    fontSize: 20,
+    color: '#6366f1',
+    fontWeight: '900',
+  },
 });

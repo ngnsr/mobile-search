@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { Document, DocumentChunk, DocumentService } from '../services/DocumentService';
 import { SearchDocumentResult, SearchMode } from '../services/SearchService';
 import { FileIndexingService } from '../services/FileIndexingService';
@@ -38,7 +39,7 @@ function HighlightedText({
   const terms = buildQueryTerms(query);
   if (!terms.length) return <Text style={styles.content}>{text}</Text>;
 
-  const pattern = new RegExp(`(${terms.map(escapeRegExp).join('|')})`, 'ig');
+  const pattern = new RegExp(`(\\b${terms.map(escapeRegExp).join('|')})`, 'ig');
   const parts = text.split(pattern);
 
   return (
@@ -123,7 +124,8 @@ function buildWindow(text: string, matchStart: number, matchEnd: number) {
 }
 
 export const ResultDetailScreen: React.FC<Props> = ({ item, documentService, fileIndexingService, onBack }) => {
-  const title = item?.kind === 'doc' ? item.doc.title : item?.kind === 'result' ? item.result.document_title ?? 'Result' : '';
+  const { t } = useTranslation();
+  const title = item?.kind === 'doc' ? item.doc.title : item?.kind === 'result' ? item.result.document_title ?? t('detail.searchResult') : '';
   const body = item?.kind === 'doc' ? item.doc.content : item?.kind === 'result' ? item.result.snippet : '';
   const docId = item?.kind === 'doc' ? item.doc.id : item?.kind === 'result' ? item.result.document_id : 0;
   const query = item?.kind === 'result' ? item.query : '';
@@ -155,8 +157,25 @@ export const ResultDetailScreen: React.FC<Props> = ({ item, documentService, fil
 
   const occurrences = useMemo(() => {
     if (!isNavigableSearch || !docChunks) return [];
-    return buildOccurrences(docChunks, query);
-  }, [docChunks, isNavigableSearch, query]);
+    const found = buildOccurrences(docChunks, query);
+    if (found.length === 0 && item?.kind === 'result') {
+      const bestId = item.result.best_chunk_id;
+      const best = docChunks.find((c) => c.id === bestId);
+      if (best) {
+        return [
+          {
+            chunkId: best.id,
+            chunkIndex: docChunks.indexOf(best),
+            pageNumber: (best.page_number as any) ?? null,
+            chunkContent: best.content,
+            matchStart: 0,
+            matchEnd: 0,
+          },
+        ];
+      }
+    }
+    return found;
+  }, [docChunks, isNavigableSearch, item, query]);
 
   // Pick the initial match as the first match inside the opened chunk (if any), otherwise the first overall match.
   useEffect(() => {
@@ -194,31 +213,31 @@ export const ResultDetailScreen: React.FC<Props> = ({ item, documentService, fil
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack}>
-          <Text style={styles.backButton}>← Back</Text>
+          <Text style={styles.backButton}>← {t('common.back')}</Text>
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>{title}</Text>
       </View>
 
       <ScrollView ref={(r) => (scrollRef.current = r)} style={styles.contentContainer}>
         <Text style={styles.docId}>
-          Document ID: {String(docId)}
-          {mode ? ` • Mode: ${mode.toUpperCase()}` : ''}
+          {t('detail.documentId', { id: docId })}
+          {mode ? ` • ${t('detail.mode', { mode: mode.toUpperCase() })}` : ''}
         </Text>
         <TouchableOpacity
           style={styles.reindexButton}
           onPress={async () => {
             try {
               await fileIndexingService.reindexDocument(docId);
-              Alert.alert('Reindex started', 'Indexing runs in background. Check the documents list for progress.');
+              Alert.alert(t('detail.reindexStarted'), t('detail.reindexStartedSub'));
             } catch (e) {
               const msg = e instanceof Error ? e.message : String(e);
-              Alert.alert('Reindex failed', msg);
+              Alert.alert(t('detail.reindexFailed'), msg);
             }
           }}
         >
-          <Text style={styles.reindexButtonText}>Reindex / Update</Text>
+          <Text style={styles.reindexButtonText}>{t('detail.reindexButton')}</Text>
         </TouchableOpacity>
-        {query ? <Text style={styles.query}>Query: {query}</Text> : null}
+        {query ? <Text style={styles.query}>{t('detail.query', { query })}</Text> : null}
         {isNavigableSearch ? (
           <View style={styles.navRow}>
             <TouchableOpacity
@@ -230,7 +249,8 @@ export const ResultDetailScreen: React.FC<Props> = ({ item, documentService, fil
             </TouchableOpacity>
             <Text style={styles.navStatus}>
               {occurrences.length ? `${activeOccurrenceIndex + 1}/${occurrences.length}` : '0/0'}
-              {activeOccurrence?.pageNumber ? ` • Page ${activeOccurrence.pageNumber}` : ''}
+              {activeOccurrence?.pageNumber ? ` • ${t('search.page', { page: activeOccurrence.pageNumber })}` : ''}
+              {activeOccurrence && activeOccurrence.matchEnd === 0 ? ` • ${t('detail.semanticMatch')}` : ''}
             </Text>
             <TouchableOpacity
               style={[
@@ -246,7 +266,7 @@ export const ResultDetailScreen: React.FC<Props> = ({ item, documentService, fil
         ) : null}
         {isNavigableSearch && occurrences.length > 0 ? (
           <TouchableOpacity style={styles.matchesToggle} onPress={() => setShowMatches((v) => !v)}>
-            <Text style={styles.matchesToggleText}>{showMatches ? 'Hide matches' : 'Show all matches'}</Text>
+            <Text style={styles.matchesToggleText}>{showMatches ? t('detail.hideMatches') : t('detail.showMatches')}</Text>
           </TouchableOpacity>
         ) : null}
         <View style={styles.divider} />
@@ -266,7 +286,7 @@ export const ResultDetailScreen: React.FC<Props> = ({ item, documentService, fil
                   }}
                 >
                   <Text style={styles.matchItemTitle}>
-                    {o.pageNumber ? `Page ${o.pageNumber}` : 'Match'} • #{idx + 1}
+                    {o.pageNumber ? t('search.page', { page: o.pageNumber }) : t('detail.match')} • #{idx + 1}
                   </Text>
                   <Text style={styles.matchItemText} numberOfLines={2}>
                     {excerptStart > 0 ? '…' : ''}

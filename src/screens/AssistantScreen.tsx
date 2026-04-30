@@ -1,13 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import Markdown from 'react-native-markdown-display';
-import FileViewer from 'react-native-file-viewer';
 import { SearchService } from '../services/SearchService';
 import { AssistantService, ChatMessage } from '../services/AssistantService';
 
 type UiSource = { id: number; title: string; localUri?: string | null; kind?: string | null };
 type UiMsg = { role: 'user' | 'assistant'; content: string; sources?: UiSource[] };
-
 export function AssistantScreen({
   searchService,
   onBack,
@@ -15,6 +14,7 @@ export function AssistantScreen({
   searchService: SearchService;
   onBack: () => void;
 }) {
+  const { t } = useTranslation();
   const [model, setModel] = useState('fast');
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<UiMsg[]>([]);
@@ -32,57 +32,67 @@ export function AssistantScreen({
 
     try {
       const res = await searchService.search(q, 'hybrid', 15);
-      console.log('[DEBUG] Search results count:', res.results.length);
-      if (res.results.length > 0) {
-        console.log('[DEBUG] First search result metadata:', JSON.stringify({
-          id: res.results[0].id,
-          doc_id: res.results[0].document_id,
-          title: res.results[0].document_title,
-          local_uri: res.results[0].source_local_uri,
-          kind: res.results[0].source_kind
-        }, null, 2));
-      }
       
-      const sourceMap = new Map<number, UiSource>();
-      const sources = res.results.map((r, idx) => {
-        const title = r.document_title ?? `Doc ${r.document_id}`;
-        
-        if (!sourceMap.has(r.document_id)) {
-          sourceMap.set(r.document_id, {
+      const sourceDocs: { id: number; uiIndex: number; title: string; chunks: string[]; localUri?: string | null; kind?: string | null }[] = [];
+      const docIdToIndex = new Map<number, number>();
+
+      res.results.forEach((r) => {
+        if (!docIdToIndex.has(r.document_id)) {
+          docIdToIndex.set(r.document_id, sourceDocs.length);
+          sourceDocs.push({
             id: r.document_id,
-            title,
+            uiIndex: sourceDocs.length + 1,
+            title: r.document_title ?? `Doc ${r.document_id}`,
+            chunks: [],
             localUri: r.source_local_uri,
             kind: r.source_kind
           });
         }
-
-        const page = (r as any).page_number ? ` (p.${(r as any).page_number})` : '';
-        // Removed harsh 900 character truncation so the full 300 words are sent
-        return `[#${idx + 1}] ${title}${page}\n${r.content}`;
+        const doc = sourceDocs[docIdToIndex.get(r.document_id)!];
+        const page = (r as any).page_number ? ` (Page ${(r as any).page_number})` : '';
+        doc.chunks.push(`--- Chunk${page} ---\n${r.content}`);
       });
+
+      const finalSources = sourceDocs.map(d => ({
+        id: d.id,
+        title: `[#${d.uiIndex}] ${d.title}`,
+        localUri: d.localUri,
+        kind: d.kind
+      }));
+
+      const sourcesText = sourceDocs.length > 0 
+        ? sourceDocs.map(d => `Source [#${d.uiIndex}]: ${d.title}\n${d.chunks.join('\n\n')}`).join('\n\n====================\n\n')
+        : t('assistant.noSources');
 
       const system: ChatMessage = {
         role: 'system',
         content:
-          'You are a helpful assistant for a local document search app. ' +
-          'Answer the user using ONLY the provided sources. ' +
-          'If sources are insufficient, say so. ' +
-          'Cite sources like [#1], [#2].',
+          'You are a strict assistant for a local document search app. ' +
+          'For questions about documents, you MUST answer using ONLY the provided sources. ' +
+          `If the provided sources do not contain the answer, you MUST reply EXACTLY with: "${t('assistant.cannotAnswer')}" ` +
+          'If the user just says hello or makes small talk, greet them politely and remind them you only answer questions based on documents. ' +
+          'DO NOT use your internal knowledge for factual queries. DO NOT hallucinate information or citations. ' +
+          'When citing a source, use the exact format [#<number>].',
       };
 
       const user: ChatMessage = {
         role: 'user',
-        content: `Question: ${q}\n\nSources:\n\n${sources.join('\n\n---\n\n')}`,
+        content: `Sources:\n\n${sourcesText}\n\nQuestion: ${q}`,
       };
 
-      const finalSources = Array.from(sourceMap.values());
+      const history: ChatMessage[] = messages.map(m => ({
+        role: m.role,
+        content: m.content
+      }));
 
-      // Immediately add an empty assistant message that we will stream into
+      // Keep only the last 10 messages to avoid context overflow
+      const recentHistory = history.slice(-10);
+
       setMessages((m) => [...m, { role: 'assistant', content: '', sources: finalSources }]);
 
       await assistant.chat({ 
         model, 
-        messages: [system, user],
+        messages: [system, ...recentHistory, user],
         onChunk: (chunk) => {
           setMessages((current) => {
             const next = [...current];
@@ -96,31 +106,27 @@ export function AssistantScreen({
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('Assistant error', msg);
+      Alert.alert(t('common.error'), msg);
     } finally {
       setBusy(false);
     }
   };
 
-  // Removed handleOpenSource as requested
-  const handleOpenSource = async (source: UiSource) => {
-    // Feature disabled
-  };
-
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack}>
-          <Text style={styles.backButton}>← Back</Text>
+        <TouchableOpacity onPress={onBack} style={styles.backButtonBox}>
+          <Text style={styles.backButton}>← {t('common.back')}</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Assistant</Text>
+        <Text style={styles.title}>{t('assistant.title')}</Text>
       </View>
-
-      <View style={styles.divider} />
 
       <ScrollView style={styles.chat} contentContainerStyle={styles.chatContent}>
         {messages.length === 0 ? (
-          <Text style={styles.empty}>Ask something about your documents.</Text>
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyTitle}>{t('assistant.emptyTitle')}</Text>
+            <Text style={styles.emptyText}>{t('assistant.emptyText')}</Text>
+          </View>
         ) : null}
         {messages.map((m, idx) => (
           <View key={idx} style={[styles.bubble, m.role === 'user' ? styles.userBubble : styles.assistantBubble]}>
@@ -129,33 +135,29 @@ export function AssistantScreen({
               <>
                 {m.sources && m.sources.length > 0 && (
                   <View style={styles.sourcesContainer}>
-                    <Text style={styles.sourcesTitle}>Sources used ({m.sources.length}):</Text>
+                    <Text style={styles.sourcesLabel}>{t('assistant.sourcesLabel')}</Text>
                     <View style={styles.sourcesList}>
                       {m.sources.map((src) => (
-                        <View
-                          key={src.id}
-                          style={styles.sourceItem}
-                        >
-                          <View style={[styles.iconBox, { backgroundColor: src.kind === 'pdf' ? '#fee2e2' : '#e0f2fe' }]}>
-                            <Text style={styles.sourceIcon}>{src.kind === 'pdf' ? '📕' : '📄'}</Text>
-                          </View>
-                          <View style={styles.sourceInfo}>
-                            <Text style={styles.sourceText} numberOfLines={1}>{src.title}</Text>
-                            <Text style={styles.sourceDetail}>{src.kind?.toUpperCase() || 'FILE'}</Text>
-                          </View>
+                        <View key={src.id} style={styles.sourceRow}>
+                          <Text style={styles.sourceEmoji}>{src.kind === 'pdf' ? '📕' : '📄'}</Text>
+                          <Text style={styles.sourceTitle} numberOfLines={1}>{src.title}</Text>
                         </View>
                       ))}
                     </View>
                   </View>
                 )}
-                <Markdown style={markdownStyles}>{m.content}</Markdown>
+                <Markdown style={markdownStyles}>{m.content || '...'}</Markdown>
               </>
             ) : (
               <Text style={styles.bubbleText}>{m.content}</Text>
             )}
           </View>
         ))}
-        {busy ? <ActivityIndicator size="small" color="#3498db" /> : null}
+        {busy ? (
+          <View style={styles.loaderLine}>
+            <ActivityIndicator size="small" color="#6366f1" />
+          </View>
+        ) : null}
       </ScrollView>
 
       <View style={styles.composer}>
@@ -163,12 +165,13 @@ export function AssistantScreen({
           style={styles.composerInput}
           value={input}
           onChangeText={setInput}
-          placeholder="Type a question..."
+          placeholder={t('assistant.composerPlaceholder')}
+          placeholderTextColor="#94a3b8"
           editable={!busy}
           onSubmitEditing={send}
         />
         <TouchableOpacity style={[styles.sendButton, busy && styles.sendDisabled]} onPress={send} disabled={busy}>
-          <Text style={styles.sendText}>Send</Text>
+          <Text style={styles.sendText}>{t('assistant.send')}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -176,69 +179,124 @@ export function AssistantScreen({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', alignItems: 'center', padding: 20, backgroundColor: '#fff', elevation: 2 },
-  backButton: { fontSize: 18, color: '#3498db', marginRight: 20 },
-  title: { fontSize: 20, fontWeight: 'bold' },
-  settings: { padding: 14, backgroundColor: '#fff' },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#2c3e50', marginBottom: 10 },
-  label: { fontSize: 12, color: '#666', marginBottom: 6, fontWeight: '700' },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, backgroundColor: '#fff', fontSize: 12, marginBottom: 10 },
-  saveButton: { backgroundColor: '#2ecc71', padding: 10, borderRadius: 8, alignItems: 'center' },
-  saveButtonText: { color: '#fff', fontWeight: '800', fontSize: 12 },
-  divider: { height: 1, backgroundColor: '#eee' },
-  chat: { flex: 1 },
-  chatContent: { padding: 12, gap: 10 },
-  empty: { color: '#888', textAlign: 'center', marginTop: 20 },
-  bubble: { padding: 10, borderRadius: 10 },
-  userBubble: { backgroundColor: '#d6ecff', alignSelf: 'flex-end', maxWidth: '85%' },
-  assistantBubble: { backgroundColor: '#fff', alignSelf: 'flex-start', maxWidth: '90%', minWidth: '70%' },
-  bubbleRole: { fontSize: 10, color: '#666', fontWeight: '800', marginBottom: 6 },
-  bubbleText: { fontSize: 13, color: '#2c3e50' },
-  sourcesContainer: { marginBottom: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', paddingBottom: 10 },
-  sourcesTitle: { fontSize: 9, color: '#a0aec0', fontWeight: '800', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
-  sourcesList: { gap: 8 },
-  sourceItem: { 
+  container: { flex: 1, backgroundColor: '#f8fafc' },
+  header: { 
     flexDirection: 'row', 
     alignItems: 'center', 
+    paddingHorizontal: 20, 
+    paddingVertical: 16,
     backgroundColor: '#fff', 
-    borderWidth: 1, 
-    borderColor: '#edf2f7', 
-    borderRadius: 10, 
-    padding: 8,
-    width: '100%',
+    borderBottomWidth: 1, 
+    borderBottomColor: '#f1f5f9'
+  },
+  backButtonBox: { padding: 4 },
+  backButton: { fontSize: 16, color: '#6366f1', fontWeight: 'bold' },
+  title: { fontSize: 20, fontWeight: '800', color: '#1e293b', marginLeft: 16 },
+  chat: { flex: 1 },
+  chatContent: { padding: 16, paddingBottom: 32, gap: 20 },
+  emptyContainer: { alignItems: 'center', marginTop: 100 },
+  emptyTitle: { fontSize: 24, fontWeight: '900', color: '#1e293b', marginBottom: 8 },
+  emptyText: { fontSize: 15, color: '#64748b', textAlign: 'center', maxWidth: '80%' },
+  bubble: { 
+    padding: 16, 
+    borderRadius: 16, 
+    maxWidth: '90%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
     elevation: 2,
+  },
+  userBubble: { 
+    backgroundColor: '#6366f1', 
+    alignSelf: 'flex-end', 
+    borderBottomRightRadius: 4,
+  },
+  assistantBubble: { 
+    backgroundColor: '#fff', 
+    alignSelf: 'flex-start', 
+    borderTopLeftRadius: 4,
+    minWidth: '80%',
+    borderColor: '#f1f5f9',
+    borderWidth: 1,
+  },
+  bubbleRole: { fontSize: 9, fontWeight: '900', marginBottom: 8, letterSpacing: 1 },
+  bubbleRoleUser: { color: 'rgba(255,255,255,0.7)' },
+  bubbleRoleAssistant: { color: '#94a3b8' },
+  bubbleText: { fontSize: 15, lineHeight: 22, color: '#fff' },
+  sourcesContainer: { 
+    marginBottom: 16, 
+    backgroundColor: '#f1f5f9', 
+    padding: 12, 
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  sourcesLabel: { 
+    fontSize: 10, 
+    fontWeight: '900', 
+    color: '#64748b', 
+    marginBottom: 10, 
+    letterSpacing: 1,
+    textTransform: 'uppercase'
+  },
+  sourcesList: { gap: 8 },
+  sourceRow: { 
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff', 
+    paddingHorizontal: 12, 
+    paddingVertical: 10, 
+    borderRadius: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 2,
+    elevation: 1,
   },
-  iconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
+  sourceEmoji: { fontSize: 14, marginRight: 10 },
+  sourceTitle: { fontSize: 13, fontWeight: '600', color: '#1e293b', flex: 1 },
+  composer: { 
+    flexDirection: 'row', 
+    padding: 16, 
+    backgroundColor: '#fff', 
+    gap: 12, 
     alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
   },
-  sourceIcon: { fontSize: 18 },
-  sourceInfo: { flex: 1 },
-  sourceText: { fontSize: 13, color: '#2d3748', fontWeight: '700' },
-  sourceDetail: { fontSize: 10, color: '#a0aec0', marginTop: 1 },
-  openArrowBox: {
-    padding: 4,
+  composerInput: { 
+    flex: 1, 
+    backgroundColor: '#f8fafc',
+    borderRadius: 12, 
+    paddingHorizontal: 16, 
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#1e293b',
+    borderWidth: 1,
+    borderColor: '#e2e8f0'
   },
-  openArrow: { fontSize: 16, color: '#3182ce', fontWeight: 'bold' },
-  composer: { flexDirection: 'row', padding: 10, backgroundColor: '#fff', gap: 10, alignItems: 'center' },
-  composerInput: { flex: 1, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, fontSize: 14 },
-  sendButton: { backgroundColor: '#3498db', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
-  sendDisabled: { opacity: 0.6 },
-  sendText: { color: '#fff', fontWeight: '800' },
+  sendButton: { 
+    backgroundColor: '#6366f1', 
+    paddingVertical: 12, 
+    paddingHorizontal: 20, 
+    borderRadius: 12,
+    shadowColor: '#6366f1',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  sendDisabled: { opacity: 0.5 },
+  sendText: { color: '#fff', fontWeight: 'bold' },
+  loaderLine: { alignSelf: 'flex-start', marginLeft: 20 },
 });
 
 const markdownStyles = StyleSheet.create({
-  body: { fontSize: 13, color: '#2c3e50' },
-  code_block: { backgroundColor: '#f0f0f0', padding: 8, borderRadius: 4, fontFamily: 'monospace' },
-  code_inline: { backgroundColor: '#f0f0f0', paddingHorizontal: 4, borderRadius: 4, fontFamily: 'monospace' },
+  body: { fontSize: 15, lineHeight: 24, color: '#1e293b' },
+  code_block: { backgroundColor: '#f1f5f9', padding: 12, borderRadius: 8, fontFamily: 'monospace', fontSize: 13, marginVertical: 8 },
+  code_inline: { backgroundColor: '#f1f5f9', paddingHorizontal: 6, borderRadius: 4, fontFamily: 'monospace', fontWeight: '700' },
+  link: { color: '#6366f1', textDecorationLine: 'underline' },
 });
+
 
